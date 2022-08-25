@@ -14,29 +14,47 @@ class DentaBot extends ActivityHandler {
         if (!configuration) throw new Error('[QnaMakerBot]: Missing parameter. configuration is required');
 
         // create a QnAMaker connector
-        this.QnAMaker = new QnAMaker()
+        this.QnAMaker = new QnAMaker(configuration.QnAConfiguration, qnaOptions);
        
         // create a DentistScheduler connector
-      
+        this.DentistScheduler = new DentistScheduler(configuration.SchedulerConfiguration);
         // create a IntentRecognizer connector
+        this.IntentRecognizer = new IntentRecognizer(configuration.LuisConfiguration);
 
 
         this.onMessage(async (context, next) => {
-            // send user input to QnA Maker and collect the response in a variable
-            // don't forget to use the 'await' keyword
-          
-            // send user input to IntentRecognizer and collect the response in a variable
-            // don't forget 'await'
-                     
-            // determine which service to respond with based on the results from LUIS //
+            try {
+                // send user input to QnA Maker and collect the response in a variable
+                const qnaResults = await this.QnAMaker.getAnswers(context);
 
-            // if(top intent is intentA and confidence greater than 50){
-            //  doSomething();
-            //  await context.sendActivity();
-            //  await next();
-            //  return;
-            // }
-            // else {...}
+                // send user input to IntentRecognizer and collect the response in a variable
+                const luisResult = await this.IntentRecognizer.executeLuisQuery(context);
+
+                const topIntent = luisResult.luisResult.prediction.topIntent;
+
+                let message;
+
+                if (luisResult.intents[topIntent].score > 0.65) {
+                    if (topIntent === 'GetAvailability') {
+                        message = await this.DentistScheduler.getAvailability();
+                    } else if (topIntent === 'ScheduleAppointment') {
+                        message = await this.DentistScheduler.scheduleAppointment(this.IntentRecognizer.getTimeEntity(luisResult));
+                    };
+                } else if (qnaResults[0]) {
+                    // If an answer was received from QnA Maker, send the answer back to the user.
+                    message = qnaResults[0].answer;
+                }
+
+                if (!message) {
+                    // If no answers were returned from the services, reply with help.
+                    message = "I'm not sure what you are talking about. You can ask me questions about your dental session like can I book an appointment tomorrow at 11:45 am?"
+                }
+
+                await context.sendActivity(message);
+            } catch (e) {
+                console.error(e);
+                await context.sendActivity('There are some errors with the Chat Bot. Please try later.');
+            }
              
             await next();
     });
@@ -44,7 +62,7 @@ class DentaBot extends ActivityHandler {
         this.onMembersAdded(async (context, next) => {
         const membersAdded = context.activity.membersAdded;
         //write a custom greeting
-        const welcomeText = '';
+        const welcomeText = 'Welcome to The Heart and the Brain Clinic';
         for (let cnt = 0; cnt < membersAdded.length; ++cnt) {
             if (membersAdded[cnt].id !== context.activity.recipient.id) {
                 await context.sendActivity(MessageFactory.text(welcomeText, welcomeText));
